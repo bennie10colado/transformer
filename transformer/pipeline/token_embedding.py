@@ -1,52 +1,45 @@
-import math
+from .common import xp
 
-# ── Implementação PyTorch ───────────────────────────────────────────────
-import torch
-import torch.nn as nn
+def create_embedding(vocab_size: int, d_model: int):
+    """Cria uma matriz de embedding inicializada."""
+    # Inicialização de Glorot/Xavier
+    limit = xp.sqrt(6 / (vocab_size + d_model))
+    return xp.random.uniform(-limit, limit, (vocab_size, d_model), dtype=xp.float32)
 
-class TokenEmbedding(nn.Module):
+def embed_tokens(ids: xp.ndarray, W_emb: xp.ndarray) -> xp.ndarray:
     """
-    Embedding layer em PyTorch, com Xavier-Uniform initialization.
+    Busca os vetores de embedding para uma sequência de IDs.
+    Esta é a operação de "lookup" do forward pass.
     """
-    def __init__(self, vocab_size: int, d_model: int, device: str = 'cpu'):
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.d_model    = d_model
+    return W_emb[ids]
 
-        # Xavier-Uniform
-        limit = math.sqrt(6 / (vocab_size + d_model))
-        weights = (torch.rand(vocab_size, d_model, device=device) * 2 - 1) * limit
-        self.embedding_weights = nn.Parameter(weights)
-
-    def forward(self, token_ids: torch.LongTensor) -> torch.Tensor:
-        """
-        token_ids: LongTensor of shape (batch, seq_len)
-        retorna:   Tensor of shape (batch, seq_len, d_model)
-        """
-        embedded = self.embedding_weights[token_ids]
-        return embedded * math.sqrt(self.d_model)
-
-
-# ── Implementação NumPy/CuPy ────────────────────────────────────────────
-from .common import xp  # xp → numpy ou cupy
-
-def create_embedding(vocab_size: int, d_model: int) -> xp.ndarray:
+def token_embedding_backward(d_embeddings: xp.ndarray, ids: xp.ndarray, W_emb: xp.ndarray) -> xp.ndarray:
     """
-    Cria matriz de embedding (vocab_size, d_model) Xavier-Uniform.
+    Calcula o gradiente para a matriz de embedding (W_emb).
+    Esta é a operação de "scatter-add" do backward pass.
+    
+    Args:
+        d_embeddings: O gradiente vindo da camada seguinte (dL/dE).
+                      Shape: (batch_size, seq_len, d_model)
+        ids: Os IDs dos tokens originais.
+             Shape: (batch_size, seq_len)
+        W_emb: A matriz de embedding original, para sabermos seu shape.
+    
+    Returns:
+        O gradiente para a matriz de embedding (dL/dW_emb).
+        Shape: (vocab_size, d_model)
     """
-    limit = math.sqrt(6 / (vocab_size + d_model))
-    return (xp.random.rand(vocab_size, d_model, dtype=xp.float32) * 2 - 1) * limit
-
-def embed_tokens(token_ids: xp.ndarray, W: xp.ndarray) -> xp.ndarray:
-    """
-    token_ids: array int32 (batch, seq_len)
-    W:         array float32 (vocab_size, d_model)
-    retorna:   array float32 (batch, seq_len, d_model)
-    """
-    B, T = token_ids.shape
-    D    = W.shape[1]
-    out  = xp.zeros((B, T, D), dtype=xp.float32)
-    for i in range(B):
-        for j in range(T):
-            out[i, j] = W[token_ids[i, j]]
-    return out * math.sqrt(D)
+    # Cria uma matriz de gradientes zerada com o mesmo shape da matriz de embedding
+    grad_W_emb = xp.zeros_like(W_emb)
+    
+    # Achata os IDs e os gradientes para facilitar a indexação
+    flat_ids = ids.flatten()
+    flat_d_emb = d_embeddings.reshape(-1, d_embeddings.shape[-1])
+    
+    # A mágica acontece aqui: xp.add.at
+    # Para cada ID em `flat_ids`, ele soma o gradiente correspondente
+    # de `flat_d_emb` à linha apropriada em `grad_W_emb`.
+    # É uma forma eficiente de fazer a operação de "espalhar e somar".
+    xp.add.at(grad_W_emb, flat_ids, flat_d_emb)
+    
+    return grad_W_emb

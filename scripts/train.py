@@ -48,6 +48,9 @@ def run_train(
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
 
+
+    # TODO: diminuir a quantidade de tokens da base, para evitar de o modelo ser treinado com muitas palavras, pode implicar em overfitting, mas se conseguir traduzir eh a meta;
+    
     # 1) tokenizer + dados
     tokenizer = AutoTokenizer.from_pretrained(
         "Helsinki-NLP/opus-mt-tc-big-en-pt",
@@ -57,7 +60,12 @@ def run_train(
 
     raw = load_dataset(
         "tatoeba", lang1="en", lang2="pt", trust_remote_code=True
-    )["train"].shuffle(seed=42).select(range(max_examples))
+    )["train"].select(range(10))
+
+    print(f"Total de sentenças: {len(raw)}")
+    print(f"Exemplo de sentença: {raw[0]}")
+
+    print(f"Total de palavras: {sum(len(ex['translation']['pt'].split()) for ex in raw)}")
 
     data_loader = NumpyDataLoader(raw, tokenizer, batch_size, max_len)
 

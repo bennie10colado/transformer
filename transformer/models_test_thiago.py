@@ -52,8 +52,11 @@ def main():
 
     # 1) carregando dataset
     ds = load_dataset("tatoeba", lang1="en", lang2="pt", trust_remote_code=True)["train"]
-    ds = ds.shuffle(seed=42).select(range(1000))
-
+    ds = ds.select(range(10))
+    print(f"Total de sentenças: {len(ds)}")
+    print(f"Exemplo de sentença: {ds[0]}")
+    print(f"Total de palavras: {sum(len(ex['translation']['pt'].split()) for ex in ds)}")
+    
     # 2) tokenizer
     model_name = "Helsinki-NLP/opus-mt-tc-big-en-pt"
     tokenizer  = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)

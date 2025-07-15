@@ -1,101 +1,79 @@
-from .common import xp
 import math
-from .scaled_dot_product_attention import scaled_dot_product_attention
+from .common import xp
+from .scaled_dot_product_attention import scaled_dot_product_attention, scaled_dot_product_attention_backward
 
 class MultiHeadAttention:
-    """
-    Implementação da camada de Multi-Head Self-Attention.
-    """
+    """Implementa a camada de Multi-Head Attention."""
+    
+    def __init__(self, d_model: int, num_heads: int):
+        assert d_model % num_heads == 0, "d_model deve ser divisível por num_heads"
+        self.d_model, self.num_heads, self.dk = d_model, num_heads, d_model // num_heads
+        
+        limit = math.sqrt(6 / (d_model * 2))
+        self.W_q = xp.random.uniform(-limit, limit, (d_model, d_model), dtype=xp.float32)
+        self.W_k = xp.random.uniform(-limit, limit, (d_model, d_model), dtype=xp.float32)
+        self.W_v = xp.random.uniform(-limit, limit, (d_model, d_model), dtype=xp.float32)
+        self.W_o = xp.random.uniform(-limit, limit, (d_model, d_model), dtype=xp.float32)
+        
+        self._cache = {}
 
-    def __init__(self, embed_dim: int, num_heads: int):
-        """
-        Inicializador da classe.
+    def get_parameters_dict(self) -> dict:
+        return {"W_q": self.W_q, "W_k": self.W_k, "W_v": self.W_v, "W_o": self.W_o}
 
-        Args:
-            embed_dim (int): A dimensionalidade dos embeddings de entrada. (d_model)
-            num_heads (int): O número de cabeças de atenção a serem usadas.
-        """
-        # Garante que a dimensão do embedding pode ser dividida igualmente entre as cabeças
-        assert embed_dim % num_heads == 0, "A dimensão do embedding deve ser divisível pelo número de cabeças."
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim  = embed_dim // num_heads
+    def set_parameters_dict(self, params: dict):
+        for key in ["W_q", "W_k", "W_v", "W_o"]:
+            setattr(self, key, xp.asarray(params[key]))
 
-        # Xavier uniform initialization para W_q, W_k, W_v, W_o
-        limit = math.sqrt(6 / (embed_dim + embed_dim))
-        self.W_q = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_k = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_v = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_o = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-
-    def _split_heads(self, x: xp.ndarray) -> xp.ndarray:
-        """
-        Divide a última dimensão em (num_heads, head_dim) e transpõe para o cálculo de atenção.
-
-        Entrada x: (batch_size, seq_length, embed_dim)
-        Saída:     (batch_size, num_heads, seq_length, head_dim)
-        """
+    def _split_heads(self, x: xp.ndarray):
         B, T, _ = x.shape
-        x = x.reshape(B, T, self.num_heads, self.head_dim)
-        return x.transpose(0, 2, 1, 3)
+        return x.reshape(B, T, self.num_heads, self.dk).transpose(0, 2, 1, 3)
 
-    def _combine_heads(self, x: xp.ndarray) -> xp.ndarray:
-        """
-        Reverte _split_heads:
-        Entrada x: (batch_size, num_heads, seq_length, head_dim)
-        Saída:     (batch_size, seq_length, embed_dim)
-        """
-        B, nh, T, dh = x.shape
-        return x.transpose(0, 2, 1, 3).reshape(B, T, nh * dh)
+    def _combine_heads(self, x: xp.ndarray):
+        B, _, T, _ = x.shape
+        return x.transpose(0, 2, 1, 3).reshape(B, T, self.d_model)
 
-    def forward(self,
-                query: xp.ndarray,
-                key:   xp.ndarray,
-                value: xp.ndarray,
-                mask:  xp.ndarray | None = None) -> xp.ndarray:
-        """
-        Passo forward da camada.
-        Para self-attention, query, key e value serão o mesmo tensor de entrada.
+    def forward(self, query: xp.ndarray, key: xp.ndarray, value: xp.ndarray, mask: xp.ndarray | None = None):
+        self._cache['query'], self._cache['key'], self._cache['value'] = query, key, value
+        
+        q, k, v = query @ self.W_q, key @ self.W_k, value @ self.W_v
+        
+        q_split, k_split, v_split = self._split_heads(q), self._split_heads(k), self._split_heads(v)
+        self._cache['q_split'], self._cache['k_split'], self._cache['v_split'] = q_split, k_split, v_split
+        
+        context, attn_weights = scaled_dot_product_attention(q_split, k_split, v_split, mask)
+        self._cache['attn_weights'] = attn_weights
 
-        Args:
-            query: xp.ndarray, shape (batch_size, seq_length, embed_dim)
-            key:   xp.ndarray, shape (batch_size, seq_length, embed_dim)
-            value: xp.ndarray, shape (batch_size, seq_length, embed_dim)
-            mask:  xp.ndarray or None, shape broadcastable to (batch_size, num_heads, seq_length, seq_length)
+        concat = self._combine_heads(context)
+        self._cache['concat'] = concat
+        
+        return concat @ self.W_o
 
-        Returns:
-            xp.ndarray de saída, shape (batch_size, seq_length, embed_dim)
-        """
-        # 1. Projeção linear
-        q = query @ self.W_q   # (B, T, D)
-        k = key   @ self.W_k
-        v = value @ self.W_v
+    def backward(self, d_output):
+        # 1. Gradiente da projeção de saída
+        grad_Wo = self._cache['concat'].transpose(0, 2, 1).reshape(-1, self.d_model).T @ d_output.reshape(-1, self.d_model)
+        d_concat = d_output @ self.W_o.T
+        
+        # 2. Retropropaga por combine_heads -> <<<<<<< CORREÇÃO AQUI >>>>>>>>>
+        # Para reverter a junção, nós separamos as cabeças novamente.
+        d_context = self._split_heads(d_concat)
+        
+        # 3. Retropropaga pela atenção escalada
+        dq_s, dk_s, dv_s = scaled_dot_product_attention_backward(d_context, self._cache['q_split'], self._cache['k_split'], self._cache['v_split'], self._cache['attn_weights'])
 
-        # 2. Dividir em múltiplas cabeças
-        q = self._split_heads(q)  # (B, nh, T, dk)
-        k = self._split_heads(k)
-        v = self._split_heads(v)
+        # 4. Retropropaga por split_heads
+        dq = self._combine_heads(dq_s)
+        dk = self._combine_heads(dk_s)
+        dv = self._combine_heads(dv_s)
+        
+        # 5. Gradientes das projeções de entrada
+        grad_Wq = self._cache['query'].transpose(0, 2, 1).reshape(-1, self.d_model).T @ dq.reshape(-1, self.d_model)
+        grad_Wk = self._cache['key'].transpose(0, 2, 1).reshape(-1, self.d_model).T @ dk.reshape(-1, self.d_model)
+        grad_Wv = self._cache['value'].transpose(0, 2, 1).reshape(-1, self.d_model).T @ dv.reshape(-1, self.d_model)
 
-        # 3. Scaled dot-product attention
-        context = scaled_dot_product_attention(q, k, v, mask)  # (B, nh, T, dk)
-
-        # 4. Concatenar cabeças e aplicar W_o
-        concat = self._combine_heads(context)  # (B, T, D)
-        output = concat @ self.W_o             # (B, T, D)
-
-        return output
-
-
-# Exemplo de uso (opcional)
-if __name__ == "__main__":
-    batch_size = 2
-    seq_length = 5
-    embed_dim  = 16
-    num_heads  = 4
-
-    # Simula dados aleatórios
-    x = xp.random.randn(batch_size, seq_length, embed_dim).astype(xp.float32)
-
-    mha = MultiHeadAttention(embed_dim, num_heads)
-    out = mha.forward(x, x, x, mask=None)
-    print("Output shape:", out.shape)  # deve ser (batch_size, seq_length, embed_dim)
+        # Gradientes em relação às entradas da camada
+        d_query = dq @ self.W_q.T
+        d_key = dk @ self.W_k.T
+        d_value = dv @ self.W_v.T
+        
+        grads = {"W_q": grad_Wq, "W_k": grad_Wk, "W_v": grad_Wv, "W_o": grad_Wo}
+        return d_query, d_key, d_value, grads

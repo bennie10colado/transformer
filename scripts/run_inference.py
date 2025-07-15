@@ -4,12 +4,13 @@ import numpy as onp
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from datasets import load_dataset
 from transformers import AutoTokenizer
-from transformer.pipeline.common            import xp
+from transformer.pipeline.common import xp
 from transformer.pipeline.transformer_manual import Transformer
 
 # ─────── CONFIGURAÇÃO ───────────────────────────────────────────────
-DEBUG = False
+DEBUG = True
 
 if DEBUG:
     D_MODEL    = 128
@@ -44,20 +45,33 @@ model = Transformer(
     max_len=MAX_LEN
 )
 
-# 3) Carrega checkpoint NumPy
-ckpt = onp.load(CHECKPOINT)
-model.Wemb_src = xp.asarray(ckpt["Wemb_src"])
-model.Wemb_tgt = xp.asarray(ckpt["Wemb_tgt"])
-model.Wout     = xp.asarray(ckpt["Wout"])
-# Se tiver treinado mais parametros na versão FULL:
-# ex: model.enc[0].self_attn.W_q = xp.asarray(ckpt["enc_0_Wq"]) etc.
-
+# 3) Carrega checkpoint
 print(f"→ Usando {'DEBUG' if DEBUG else 'FULL'} checkpoint: {CHECKPOINT}")
-print("GPU disponível?", hasattr(xp, "get_default_memory_pool"))
+print(f"GPU disponível? {hasattr(xp, 'get_default_memory_pool')}")
+
+try:
+    # Carrega o arquivo de pesos
+    weights = onp.load(CHECKPOINT, allow_pickle=True)
+    
+    # Extrai o dicionário de parâmetros do arquivo .npz
+    if len(weights.files) == 1 and weights.files[0] == 'arr_0':
+        params_dict = weights['arr_0'].item()
+    else:
+        params_dict = dict(weights)
+    
+    # === MUDANÇA PRINCIPAL ===
+    # Usa o novo método para carregar TODOS os pesos do modelo de uma só vez.
+    model.set_parameters_dict(params_dict) 
+    
+    print("Pesos carregados com sucesso via set_parameters_dict.")
+
+except Exception as e:
+    print(f"Erro ao carregar os pesos: {e}")
+    # sys.exit(1)
+
 
 # 4) Função de geração *greedy*
 def greedy_generate(text: str) -> str:
-    # tokenização
     enc = tokenizer(
         [text],
         return_tensors="np",
@@ -65,43 +79,42 @@ def greedy_generate(text: str) -> str:
         truncation=True,
         max_length=MAX_LEN
     )
-    src_ids = xp.asarray(enc["input_ids"])                 # (1, S)
-    pad_id   = tokenizer.pad_token_id
+    src_ids = xp.asarray(enc["input_ids"])
+    pad_id  = tokenizer.pad_token_id
+    is_pad  = (src_ids == pad_id)
+    mask_vals = xp.where(is_pad, -1e9, 0.0).astype(xp.float32)
+    src_mask = mask_vals[:, None, None, :]
+    sos = (tokenizer.bos_token_id or tokenizer.cls_token_id or pad_id)
+    eos = (tokenizer.eos_token_id or tokenizer.sep_token_id or sos)
+    tgt = xp.array([[sos]], dtype=xp.int32)
 
-    # --- Construção da máscara para cross-attention ---
-    # queremos uma máscara que seja (B, 1, 1, S) para broadcast até (B, nh, T, S)
-    is_pad   = (src_ids == pad_id)                         # (1, S)
-    mask_vals = xp.where(is_pad, -1e9, 0.0).astype(xp.float32)  # (1, S)
-    src_mask = mask_vals[:, None, None, :]                  # (1, 1, 1, S)
-
-    # --- Prepara SOS/EOS ---
-    sos = (tokenizer.bos_token_id or
-           tokenizer.cls_token_id or pad_id)
-    eos = (tokenizer.eos_token_id or
-           tokenizer.sep_token_id or sos)
-
-    # começa a sequência alvo com só [SOS]
-    tgt = xp.array([[sos]], dtype=xp.int32)                 # (1, 1)
-
-    # gera token a token
     for _ in range(MAX_LEN - 1):
-        logits = model.forward(src_ids, tgt, src_mask, None)  # (1, T, V)
-        next_id = int(xp.argmax(logits[0, -1]))               # escolhe próximo
+        logits = model.forward(src_ids, tgt, src_mask, None)
+        next_id = int(xp.argmax(logits[0, -1]))
         tgt = xp.concatenate(
             [tgt, xp.array([[next_id]], dtype=xp.int32)], axis=1
         )
         if next_id == eos:
             break
-
-    # decodifica removendo tokens especiais
+            
     out_ids = [int(i) for i in tgt[0, 1:].tolist()]
     return tokenizer.decode(out_ids, skip_special_tokens=True)
 
-# 5) Exemplos
-for prompt in [
-    "Hello, how are you?",
-    "This is a test of the Transformer implementation.",
-    "Machine translation is fun!"
-]:
-    print(f"> {prompt}")
-    print(f"< {greedy_generate(prompt)}\n")
+# 5) Carrega o dataset e testa nos dados de treino
+print("\n--- Testando Overfitting nos Dados de Treino ---\n")
+
+dataset_de_treino = load_dataset(
+    "tatoeba", lang1="en", lang2="pt", trust_remote_code=True
+)["train"].select(range(10))
+
+for i, exemplo in enumerate(dataset_de_treino):
+    frase_en = exemplo["translation"]["en"]
+    frase_pt_real = exemplo["translation"]["pt"]
+
+    # Gera a tradução com o modelo
+    frase_pt_modelo = greedy_generate(frase_en)
+
+    print(f"--- Exemplo #{i+1} ---")
+    print(f"Entrada (en):         {frase_en}")
+    print(f"Tradução REAL (pt):   {frase_pt_real}")
+    print(f"Tradução MODELO (pt): {frase_pt_modelo}\n")
