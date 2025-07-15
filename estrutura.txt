@@ -1,0 +1,70 @@
+﻿Listagem de caminhos de pasta
+O número de série do volume é 2218-F7DD
+C:.
+│   .gitignore
+│   estrutura.txt
+│   README.md
+│   requirements.txt
+│   resultados_traducao.csv
+│   test_gpu.py
+│   test_loss.py
+│   
+├───checkpoints
+│       epoch1.npz
+│       epoch10.npz
+│       epoch2.npz
+│       epoch3.npz
+│       epoch4.npz
+│       epoch5.npz
+│       epoch6.npz
+│       epoch7.npz
+│       epoch8.npz
+│       epoch9.npz
+│       
+├───checkpoints_debug
+│       epoch1.npz
+│       epoch2.npz
+│       epoch3.npz
+│       
+├───scripts
+│   │   run_all.py
+│   │   run_inference.py
+│   │   train.py
+│   │   train_debug.py
+│   │   
+│           
+├───transformer
+│   │   main.py
+│   │   models-test-thiago_old.py
+│   │   models_test_thiago.py
+│   │   transformer.py
+│   │   __init__.py
+│   │   
+│   ├───pipeline
+│   │   │   common.py
+│   │   │   decoder_layer.py
+│   │   │   encoder_layer.py
+│   │   │   loss.py
+│   │   │   multi_head_attention.py
+│   │   │   optimizer_scheduler.py
+│   │   │   positional_encoding.py
+│   │   │   position_wise_ffn.py
+│   │   │   residual_layer_norm.py
+│   │   │   scaled_dot_product_attention.py
+│   │   │   softmax.py
+│   │   │   test_softmax.py
+│   │   │   token_embedding.py
+│   │   │   train_loop.py
+│   │   │   transformer_manual.py
+│   │   │   __init__.py
+│   │   │   
+│   │   ├───inference
+│   │   │   │   beam_search.py
+│   │   │   │   greedy_search.py
+│   │   │   │   translator.py
+│   │   │   │   __init__.py
+│   │   │   │   
+│   │   │           
+│   │           
+│           
+├───venv

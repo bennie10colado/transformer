@@ -1,38 +1,58 @@
-from .loss                import label_smoothing_loss
-from .optimizer_scheduler import Adam, noam_schedule
-from .common              import xp
+import torch
+import torch.nn.functional as F
 
-def train_epoch(model, data_loader, pad_idx, d_model, warmup):
+def train_epoch(model: torch.nn.Module,
+                data_loader: torch.utils.data.DataLoader,
+                pad_idx: int,
+                optimizer: torch.optim.Optimizer,
+                scheduler: torch.optim.lr_scheduler._LRScheduler,
+                device: torch.device) -> float:
     """
-    Executa uma época de treinamento do Transformer puro NumPy/CuPy.
+    Treina uma época usando PyTorch autograd.
     """
-    params = list(model.get_parameters_dict().values())
-    optim  = Adam(params, lr=1.0, betas=(0.9,0.98))
+    model.train()
+    total_loss = 0.0
 
-    total_loss   = 0.0
-    step         = 0
-    batch_count  = 0
+    for batch_i, batch in enumerate(data_loader):
+        src_ids = batch['src_ids'].to(device)   # (B, S)
+        tgt_ids = batch['tgt_ids'].to(device)   # (B, T)
 
-    for src, tgt in data_loader:
-        step += 1
-        batch_count += 1
+        # prepara entrada/saída do decoder (teacher forcing)
+        tgt_input  = tgt_ids[:, :-1]            # (B, T-1)
+        tgt_output = tgt_ids[:,  1:]            # (B, T-1)
 
-        tgt_input  = tgt[:, :-1]
-        tgt_output = tgt[:, 1:]
+        # máscara de padding para o encoder
+        src_mask = (src_ids != pad_idx).unsqueeze(1).unsqueeze(2)  # (B,1,1,S)
+        # máscara causal para o decoder
+        seq_len = tgt_input.size(1)
+        causal = torch.tril(torch.ones((seq_len, seq_len), device=device)).bool()
+        tgt_mask = causal.unsqueeze(0).unsqueeze(1)                # (1,1,T,T)
 
-        logits = model.forward(src, tgt_input, None, None)
-        loss   = label_smoothing_loss(logits, tgt_output, pad_idx)
-        total_loss += float(loss)
+        # forward → (B, T-1, V)
+        logits = model(src_ids, tgt_input, src_mask, tgt_mask)
+        B, Tm1, V = logits.shape
 
-        grads      = model.backward(logits, tgt_output, pad_idx)
-        optim.lr   = noam_schedule(d_model, warmup, step)
-        optim.step(grads)
+        # cross‑entropy ignorando pad tokens
+        loss = F.cross_entropy(
+            logits.reshape(-1, V),           # (B*(T-1), V)
+            tgt_output.reshape(-1),          # (B*(T-1))
+            ignore_index=pad_idx
+        )
 
-        # libera memória cupy (se for o caso)
-        try:
-            xp.get_default_memory_pool().free_all_blocks()
-        except Exception:
-            pass
+        # prints de debug no primeiro batch
+        if batch_i == 0:
+            print(f"[DEBUG][Train] src_ids.shape={src_ids.shape}, tgt_input.shape={tgt_input.shape}")
+            print(f"[DEBUG][Train] first src_ids row: {src_ids[0,:10].tolist()}")
+            print(f"[DEBUG][Train] first tgt_ids row: {tgt_ids[0,:10].tolist()}")
+            print(f"[DEBUG][Train] logits.shape={logits.shape}, loss={loss.item():.4f}")
+            print(f"[DEBUG][Train] lr={scheduler.get_last_lr()[0]:.2e}")
 
-    # retorna perda média por batch
-    return total_loss / batch_count
+        # backward + otimização
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        total_loss += loss.item()
+
+    return total_loss / len(data_loader)

@@ -74,7 +74,7 @@ def run_train(
 
     # 3) training loop
     for epoch in range(1, epochs + 1):
-        t0   = time.time()
+        t0 = time.time()
         loss = train_epoch(
             model=model,
             data_loader=data_loader,
@@ -83,7 +83,10 @@ def run_train(
             warmup=warmup
         )
         dt = time.time() - t0
-        print(f"[Ep {epoch}/{epochs}] loss={loss:.4f}  time={dt:.1f}s")
+
+        # print geral por época
+        print(f"[EPOCH {epoch:02d}/{epochs:02d}] loss={loss:.4f}  time={dt:.1f}s  lr={optimizer.lr:.6f}")
+
 
         # 4) checkpoint
         params = model.get_parameters_dict()

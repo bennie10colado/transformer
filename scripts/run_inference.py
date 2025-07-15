@@ -9,7 +9,7 @@ from transformer.pipeline.common            import xp
 from transformer.pipeline.transformer_manual import Transformer
 
 # ─────── CONFIGURAÇÃO ───────────────────────────────────────────────
-DEBUG = False
+DEBUG = True
 
 if DEBUG:
     D_MODEL    = 128
@@ -24,7 +24,7 @@ else:
     N_HEADS    = 8
     D_FF       = 2048
     MAX_LEN    = 64
-    CHECKPOINT = "checkpoints/epoch2.npz"
+    CHECKPOINT = "checkpoints/epoch9.npz"
 # ───────────────────────────────────────────────────────────────────
 
 # 1) Carrega tokenizer
@@ -55,7 +55,7 @@ model.Wout     = xp.asarray(ckpt["Wout"])
 print(f"→ Usando {'DEBUG' if DEBUG else 'FULL'} checkpoint: {CHECKPOINT}")
 print("GPU disponível?", hasattr(xp, "get_default_memory_pool"))
 
-# 4) Função de geração *greedy*
+# 4) Função de geração de words *greedy*
 def greedy_generate(text: str) -> str:
     # tokenização
     enc = tokenizer(
@@ -65,37 +65,39 @@ def greedy_generate(text: str) -> str:
         truncation=True,
         max_length=MAX_LEN
     )
-    src_ids = xp.asarray(enc["input_ids"])                 # (1, S)
+    src_ids = xp.asarray(enc["input_ids"])
     pad_id   = tokenizer.pad_token_id
+    print(f"[DEBUG][Infer] prompt=\"{text}\"")
+    print(f"[DEBUG][Infer] src_ids={src_ids.tolist()}")
+    print(f"[DEBUG][Infer] pad_id={pad_id}, pad positions={(src_ids==pad_id).sum()}")
 
-    # --- Construção da máscara para cross-attention ---
-    # queremos uma máscara que seja (B, 1, 1, S) para broadcast até (B, nh, T, S)
-    is_pad   = (src_ids == pad_id)                         # (1, S)
-    mask_vals = xp.where(is_pad, -1e9, 0.0).astype(xp.float32)  # (1, S)
-    src_mask = mask_vals[:, None, None, :]                  # (1, 1, 1, S)
+    # máscara de cross‑attention
+    is_pad   = (src_ids == pad_id)
+    mask_vals = xp.where(is_pad, -1e9, 0.0).astype(xp.float32)
+    src_mask = mask_vals[:, None, None, :]
+    print(f"[DEBUG][Infer] src_mask[0,0,0,:10]={src_mask[0,0,0,:10].tolist()}")
 
-    # --- Prepara SOS/EOS ---
-    sos = (tokenizer.bos_token_id or
-           tokenizer.cls_token_id or pad_id)
-    eos = (tokenizer.eos_token_id or
-           tokenizer.sep_token_id or sos)
+    # sequências alvo
+    sos = tokenizer.bos_token_id or tokenizer.cls_token_id or pad_id
+    eos = tokenizer.eos_token_id or tokenizer.sep_token_id or sos
+    tgt = xp.array([[sos]], dtype=xp.int32)
 
-    # começa a sequência alvo com só [SOS]
-    tgt = xp.array([[sos]], dtype=xp.int32)                 # (1, 1)
+    for t in range(MAX_LEN - 1):
+        logits = model.forward(src_ids, tgt, src_mask, None)  # (1, t+1, V)
+        probs  = softmax(logits[0, -1, :])                    # (V,)
+        next_id = int(xp.argmax(probs))
+        next_prob = float(probs[next_id])
+        print(f"[DEBUG][Infer] step={t:02d} next_id={next_id} prob={next_prob:.4f}")
 
-    # gera token a token
-    for _ in range(MAX_LEN - 1):
-        logits = model.forward(src_ids, tgt, src_mask, None)  # (1, T, V)
-        next_id = int(xp.argmax(logits[0, -1]))               # escolhe próximo
-        tgt = xp.concatenate(
-            [tgt, xp.array([[next_id]], dtype=xp.int32)], axis=1
-        )
+        tgt = xp.concatenate([tgt, xp.array([[next_id]], dtype=xp.int32)], axis=1)
         if next_id == eos:
+            print(f"[DEBUG][Infer] EOS token reached at step {t}")
             break
 
-    # decodifica removendo tokens especiais
-    out_ids = [int(i) for i in tgt[0, 1:].tolist()]
+    out_ids = tgt[0, 1:].tolist()
+    print(f"[DEBUG][Infer] out_ids={out_ids}")
     return tokenizer.decode(out_ids, skip_special_tokens=True)
+
 
 # 5) Exemplos
 for prompt in [
