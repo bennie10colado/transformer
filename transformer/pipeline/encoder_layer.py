@@ -33,22 +33,28 @@ class EncoderLayer:
         return out, cache
 
     def backward(self, dout, cache):
-        # Backprop pela norm2
+        # Backprop pela norm2 e FFN
         dx1_ffn, dffn_out, norm2_grads = self.norm2.backward(dout, cache['norm2_cache'])
+        dx1_ffn_b, ffn_grads_raw = self.ffn.backward(dffn_out, cache['ffn_cache'])
+        dx1 = dx1_ffn + dx1_ffn_b
         
-        # Backprop pela FFN
-        dx1_ffn_b, ffn_grads = self.ffn.backward(dffn_out, cache['ffn_cache'])
-        dx1 = dx1_ffn + dx1_ffn_b # Acumula gradientes
-        
-        # Backprop pela norm1
+        # Backprop pela norm1 e Self-Attention
         dx_attn, dattn_out, norm1_grads = self.norm1.backward(dx1, cache['norm1_cache'])
+        dx_attn_b, attn_grads_raw = self.self_attn.backward(dattn_out, cache['attn_cache'])
+        dx = dx_attn + dx_attn_b
         
-        # Backprop pela self-attention
-        # Como é self-attention, o gradiente de entrada é a soma dos gradientes de query, key e value.
-        dx_attn_b, attn_grads = self.self_attn.backward(dattn_out, cache['attn_cache'])
-        x = cache['x']
-        dx = dx_attn + dx_attn_b # Acumula gradientes
+        # --- A CORREÇÃO CRÍTICA ---
+        # Montamos o dicionário de gradientes adicionando os prefixos corretos.
+        grads = {}
+        for name, grad in attn_grads_raw.items():
+            grads[f"sa_{name}"] = grad # Adiciona o prefixo 'sa_'
+        for name, grad in ffn_grads_raw.items():
+            grads[f"ffn_{name}"] = grad # Adiciona o prefixo 'ffn_'
         
-        # Junta todos os gradientes
-        grads = {**attn_grads, **ffn_grads, **norm1_grads, **norm2_grads}
+        # Adiciona os gradientes das camadas de normalização
+        grads['norm1_gamma'] = norm1_grads['gamma']
+        grads['norm1_beta'] = norm1_grads['beta']
+        grads['norm2_gamma'] = norm2_grads['gamma']
+        grads['norm2_beta'] = norm2_grads['beta']
+
         return dx, grads

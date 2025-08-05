@@ -50,22 +50,34 @@ class DecoderLayer:
     def backward(self, dout, cache):
         # Backprop pela norm3 e FFN
         dx2_ffn, dffn_out, norm3_grads = self.norm3.backward(dout, cache['norm3_cache'])
-        dx2_ffn_b, ffn_grads = self.ffn.backward(dffn_out, cache['ffn_cache'])
+        dx2_ffn_b, ffn_grads_raw = self.ffn.backward(dffn_out, cache['ffn_cache'])
         dx2 = dx2_ffn + dx2_ffn_b
 
-        # Backprop through norm2
+        # Backprop pela norm2 e Cross-Attention
         dx1_attn, dattn2, norm2_grads = self.norm2.backward(dx2, cache['norm2_cache'])
-        # Backprop through cross-attention
-        dx1_attn_b, d_memory, cross_attn_grads = self.cross_attn.backward_cross(dattn2, cache['ca_cache'])
+        dx1_attn_b, d_memory, cross_attn_grads_raw = self.cross_attn.backward_cross(dattn2, cache['ca_cache'])
         dx1 = dx1_attn + dx1_attn_b
 
-        # Backprop through norm1
+        # Backprop pela norm1 e Self-Attention
         dx_attn, dattn1, norm1_grads = self.norm1.backward(dx1, cache['norm1_cache'])
-        # Backprop through self-attention
-        dx_attn_b, self_attn_grads = self.self_attn.backward(dattn1, cache['sa_cache'])
+        dx_attn_b, self_attn_grads_raw = self.self_attn.backward(dattn1, cache['sa_cache'])
         dx = dx_attn + dx_attn_b
         
-        # Combine all gradients
-        grads = {**self_attn_grads, **cross_attn_grads, **ffn_grads, **norm1_grads, **norm2_grads, **norm3_grads}
+        # --- A CORREÇÃO CRÍTICA ---
+        grads = {}
+        for name, grad in self_attn_grads_raw.items():
+            grads[f"sa_{name}"] = grad # Adiciona 'sa_'
+        for name, grad in cross_attn_grads_raw.items():
+            grads[f"ca_{name}"] = grad # Adiciona 'ca_'
+        for name, grad in ffn_grads_raw.items():
+            grads[f"ffn_{name}"] = grad # Adiciona 'ffn_'
+            
+        grads['norm1_gamma'] = norm1_grads['gamma']
+        grads['norm1_beta'] = norm1_grads['beta']
+        grads['norm2_gamma'] = norm2_grads['gamma']
+        grads['norm2_beta'] = norm2_grads['beta']
+        grads['norm3_gamma'] = norm3_grads['gamma']
+        grads['norm3_beta'] = norm3_grads['beta']
+
         return dx, d_memory, grads
 

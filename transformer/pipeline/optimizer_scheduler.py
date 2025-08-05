@@ -1,29 +1,37 @@
-from transformer.pipeline.common import xp
+from .common import xp
 
 class Adam:
-    def __init__(self, params, lr=0, betas=(0.9,0.98), eps=1e-9):
-        self.params = params  # lista de arrays NumPy
-        self.m = [xp.zeros_like(p) for p in params]
-        self.v = [xp.zeros_like(p) for p in params]
-        self.beta1, self.beta2 = betas
-        self.eps = eps
+    def __init__(self, params):
+        # Parâmetros EXATOS do artigo 
+        self.params = params
+        self.lr = 1.0 # O LR é controlado externamente pela schedule
+        self.beta1 = 0.9
+        self.beta2 = 0.98
+        self.eps = 1e-9
+        self.m = [xp.zeros_like(p) for p in self.params]
+        self.v = [xp.zeros_like(p) for p in self.params]
         self.step_num = 0
-        self.lr = lr
 
     def step(self, grads):
         self.step_num += 1
-        lr_t = self.lr * min(self.step_num**-0.5,
-                             self.step_num * self.lr**-1.5)
-        updated = []
         for i, (p, g) in enumerate(zip(self.params, grads)):
-            self.m[i] = self.beta1*self.m[i] + (1-self.beta1)*g
-            self.v[i] = self.beta2*self.v[i] + (1-self.beta2)*(g**2)
-            m_hat = self.m[i] / (1-self.beta1**self.step_num)
-            v_hat = self.v[i] / (1-self.beta2**self.step_num)
-            p -= lr_t * m_hat / (xp.sqrt(v_hat) + self.eps)
-            updated.append(p)
-        return updated
+            self.m[i] = self.beta1 * self.m[i] + (1 - self.beta1) * g
+            self.v[i] = self.beta2 * self.v[i] + (1 - self.beta2) * (g ** 2)
+            
+            m_hat = self.m[i] / (1 - self.beta1 ** self.step_num)
+            v_hat = self.v[i] / (1 - self.beta2 ** self.step_num)
+            
+            update_value = self.lr * m_hat / (xp.sqrt(v_hat) + self.eps)
+            p -= update_value
 
-
-def noam_schedule(d_model, warmup_steps, step):
-    return (d_model**-0.5) * min(step**-0.5, step * warmup_steps**-1.5)
+def noam_schedule(d_model: int, warmup_steps: int, step_num: int):
+    """
+    A implementação EXATA da schedule de learning rate do artigo.
+    """
+    if step_num == 0:
+        step_num = 1
+        
+    arg1 = step_num ** -0.5
+    arg2 = step_num * (warmup_steps ** -1.5)
+    
+    return (d_model ** -0.5) * min(arg1, arg2)

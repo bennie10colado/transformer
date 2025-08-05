@@ -1,4 +1,4 @@
-from .common import xp
+from .common import xavier_uniform_init, xp
 import math
 
 class PositionWiseFeedForwardNetwork:
@@ -16,13 +16,11 @@ class PositionWiseFeedForwardNetwork:
             [cite_start]d_ff (int): A dimensionalidade da camada interna (oculta)[cite: 151].
         """
         # Inicialização de pesos para a primeira camada linear (d_model -> d_ff)
-        lim1 = math.sqrt(6 / (d_model + d_ff))
-        self.W1 = xp.random.uniform(-lim1, lim1, (d_model, d_ff), dtype=xp.float32)
+        self.W1 = xavier_uniform_init((d_model, d_ff))
         self.b1 = xp.zeros((d_ff,), dtype=xp.float32)
 
         # Inicialização de pesos para a segunda camada linear (d_ff -> d_model)
-        lim2 = math.sqrt(6 / (d_ff + d_model))
-        self.W2 = xp.random.uniform(-lim2, lim2, (d_ff, d_model), dtype=xp.float32)
+        self.W2 = xavier_uniform_init((d_ff, d_model))
         self.b2 = xp.zeros((d_model,), dtype=xp.float32)
 
     def forward(self, x: xp.ndarray):

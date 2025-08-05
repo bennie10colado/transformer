@@ -1,4 +1,4 @@
-from .common import xp
+from .common import xavier_uniform_init, xp
 import math
 from .scaled_dot_product_attention import scaled_dot_product_attention, scaled_dot_product_attention_backward
 
@@ -10,10 +10,10 @@ class MultiHeadAttention:
         self.head_dim = embed_dim // num_heads
 
         limit = math.sqrt(6 / (embed_dim + embed_dim))
-        self.W_q = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_k = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_v = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
-        self.W_o = xp.random.uniform(-limit, limit, (embed_dim, embed_dim), dtype=xp.float32)
+        self.W_q = xavier_uniform_init((embed_dim, embed_dim))
+        self.W_k = xavier_uniform_init((embed_dim, embed_dim))
+        self.W_v = xavier_uniform_init((embed_dim, embed_dim))
+        self.W_o = xavier_uniform_init((embed_dim, embed_dim))
 
     def get_parameters(self) -> dict[str, xp.ndarray]:
         return {'W_q': self.W_q, 'W_k': self.W_k, 'W_v': self.W_v, 'W_o': self.W_o}
@@ -71,7 +71,7 @@ class MultiHeadAttention:
         d_value = dv @ self.W_v.T
         
         grads = self.get_parameters()
-        grads.update({'W_q': grad_Wq, 'W_k': grad_Wk, 'W_v': grad_Wv, 'W_o': grad_Wo})
+        grads = {'W_q': grad_Wq, 'W_k': grad_Wk, 'W_v': grad_Wv, 'W_o': grad_Wo}
         
         return (d_query + d_key + d_value), grads
     
@@ -106,6 +106,6 @@ class MultiHeadAttention:
         d_memory = (dk @ self.W_k.T) + (dv @ self.W_v.T)
         
         grads = self.get_parameters()
-        grads.update({'W_q': grad_Wq, 'W_k': grad_Wk, 'W_v': grad_Wv, 'W_o': grad_Wo})
+        grads = {'W_q': grad_Wq, 'W_k': grad_Wk, 'W_v': grad_Wv, 'W_o': grad_Wo}
         
         return d_query, d_memory, grads

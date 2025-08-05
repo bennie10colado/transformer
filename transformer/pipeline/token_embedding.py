@@ -28,14 +28,14 @@ class TokenEmbedding(nn.Module):
 
 
 # ── Implementação NumPy/CuPy ────────────────────────────────────────────
-from .common import xp  # xp → numpy ou cupy
+from .common import xavier_uniform_init, xp  # xp → numpy ou cupy
 
 def create_embedding(vocab_size: int, d_model: int) -> xp.ndarray:
     """
     Cria matriz de embedding (vocab_size, d_model) Xavier-Uniform.
     """
-    limit = math.sqrt(6 / (vocab_size + d_model))
-    return (xp.random.rand(vocab_size, d_model, dtype=xp.float32) * 2 - 1) * limit
+    return xavier_uniform_init((vocab_size, d_model))
+
 
 def embed_tokens(token_ids: xp.ndarray, W: xp.ndarray) -> xp.ndarray:
     """

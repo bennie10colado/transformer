@@ -84,7 +84,7 @@ def run_custom_train():
     batch_size = 2
     epochs = 50 # Treine por mais épocas para decorar o dataset
     warmup = 10
-    checkpoint_dir = "checkpoints_small_vocab"
+    checkpoint_dir = "checkpoints_small_vocab2"
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     # Salva o vocabulário para ser usado na inferência depois

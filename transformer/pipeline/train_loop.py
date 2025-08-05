@@ -16,7 +16,7 @@ def train_epoch(model, data_loader, pad_idx, d_model, warmup):
     Executa uma época de treinamento do Transformer puro NumPy/CuPy.
     """
     params = list(model.get_parameters_dict().values())
-    optim  = Adam(params, lr=1.0, betas=(0.9,0.98))
+    optim = Adam(list(model.get_parameters_dict().values()))
 
     total_loss   = 0.0
     step         = 0

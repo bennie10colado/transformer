@@ -8,4 +8,8 @@ checkpoints
 checkpoins_debug
 .python-version
 checkpoints_small_vocab
+checkpoints_small_vocab2
 checkpoints_small_vocab/
+checkpoints_small_vocab2/
+checkpoints_final_test
+checkpoints_final_test/
